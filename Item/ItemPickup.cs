@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 public class ItemPickup : MonoBehaviour
 {
@@ -7,7 +7,7 @@ public class ItemPickup : MonoBehaviour
     //Adds item to the inventory
     public void PickUp()
     {
-        if(Inventory.instance.Add(item)) Destroy(gameObject);
+       // if (Inventory.instance.Add(item)) Destroy(gameObject);
     }
 
 }
