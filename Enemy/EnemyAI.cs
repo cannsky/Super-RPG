@@ -1,135 +1,156 @@
+using System;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
-
+[RequireComponent(typeof(EnemyStats), typeof(ExperienceGiver))]
 public class EnemyAI : MonoBehaviour
 {
-    /* 
-     * Important Notes: Make sure that nav mesh surface which is on a game object is baked and navmesh agent is added to the enemy.
-     */
+    public class EnemyState
+    {
+        public bool isRotating;
+        public bool isAttacking;
+        public bool isRotated;
+        public bool alreadyAttacked;
+    }
 
-    //Nav Mesh agent for managing enemy
-    public NavMeshAgent agent;
-    //Player's object
-    public Transform player;
-    //Animator of enemy
-    public Animator animator;
-    //Layer's to detect the ground and the player
-    public LayerMask whatIsPlayer;
-    //Walk point of the enemy while patrolling
-    private Vector3 walkPoint;
-    //Walk point set or not
-    private bool walkPointSet;
-    //Walk point range
-    public float walkPointRange;
-    //Time between attacks of the enemy
-    public float timeBetweenAttacks;
-    //Sets if enemy attacked or not
-    bool alreadyAttacked;
-    //Sight and attack range for the enemy
-    public float sightRange, attackRange;
-    //Player is in sight and attack range or not
-    private bool playerInSightRange, playerInAttackRange;
-    //Last walk point
-    private Vector3 distanceBetweenLastPoint;
-    //Checks the distance between two points
-    private Vector3 distanceToWalkPoint;
-    //Enemy's waiting status in a place while patrolling
-    private bool waitingStatus;
-    //Enemy's tolerance when path is blocked
-    private int counter;
-    //Random Number
-    private int randomNumber, lastRandomNumber;
+    public EnemyState enemyState;
+ 
+    #region Fields
+    [SerializeField] protected NavMeshAgent agent;
+    [SerializeField] public Animator animator;
+    [SerializeField] protected float walkPointRange;
+    [SerializeField] protected float timeBetweenAttacks;
+    [SerializeField] protected float timeBetweenFastAttacks;
+    [SerializeField] protected float sightRange, attackRange;
+    [SerializeField] protected float speedMultiplier = 1f;
+    [Range(0,1)][SerializeField] protected float rotateSpeedMultipler;
+    [SerializeField] protected LayerMask playerLayer;
+
+    public float attackResetTime = 5f;
+
+    protected Vector3 walkPoint;
+    protected bool walkPointSet;
+    protected bool playerInSightRange, playerInAttackRange;
+    protected float playerDistance;
+    protected Vector3 distanceBetweenLastPoint;
+    protected Vector3 distanceToWalkPoint;
+    protected Transform player;
+    protected EnemyStats stats;
+    protected Player playerStats;
+    protected PlayerStateController stateController;
+    protected IEnumerator attack;
+
+    public virtual float SpeedMultiplier
+    {
+        get => speedMultiplier;
+        set
+        {
+            speedMultiplier = value;
+            agent.speed *= value;
+        }
+    }
     
-    void Start(){
-        player = FindObjectOfType<Player>().transform;
+    #endregion
+
+    protected virtual void Start()
+    {
+        enemyState = new EnemyState();
+        playerStats = Player.Instance;
+        player = playerStats.transform;
+        stats = GetComponent<EnemyStats>();
+        stateController = PlayerStateController.Instance;
     }
 
-    void Update()
+    protected virtual void Update()
     {
-        //Checks if the player is in sight, attack range or not
-        playerInSightRange = Physics.CheckSphere(transform.position, sightRange, whatIsPlayer);
-        playerInAttackRange = Physics.CheckSphere(transform.position, attackRange, whatIsPlayer);
-        //If player is not in sight or attack range patrol
-        if (!playerInSightRange && !playerInAttackRange) Patrolling();
-        //If player is in sight range chase player
-        if (playerInSightRange && !playerInAttackRange) ChasePlayer();
-        //If player is in attack range attack to player
+        CheckRanges();
+        UpdateChecks();
+    }
+
+    protected virtual void UpdateChecks()
+    {
+        if (enemyState.isAttacking) return;
         if (playerInSightRange && playerInAttackRange) AttackPlayer();
+        else if (playerInSightRange && !playerInAttackRange) ChasePlayer();
+        else Patrolling();
+    }
+    protected virtual void CheckRanges()
+    {
+        playerInSightRange = Physics.CheckSphere(transform.position, sightRange, playerLayer);
+        playerInAttackRange = Physics.CheckSphere(transform.position, attackRange, playerLayer);
+        playerDistance = Helper.CalculateDistance(transform.position, player.position);
+    }
+    protected virtual void Patrolling()
+    {
+        throw new NotImplementedException();
     }
 
-    void Patrolling()
+    protected virtual void SearchWalkPoint()
     {
-        gameObject.GetComponent<NavMeshAgent>().enabled = true;
-        transform.Rotate(0, (transform.position.y - walkPoint.y) * Time.deltaTime, 0);
-        //If patrolling, the enemy will walk
-        animator.SetBool("Run", false);
-        animator.SetBool("Walk", true);
-        //If walk point is not set, search new walk point
-        if(!walkPointSet) SearchWalkPoint();
-        //If there is walk point, move to the walk point
-        if(walkPointSet && !waitingStatus) agent.SetDestination(walkPoint);
-        //Set walk point if enemy is not waiting
-        if(waitingStatus) agent.SetDestination(transform.position);
-        //Set last walk point to the distanceBetweenLastPoint
-        distanceBetweenLastPoint = distanceToWalkPoint;
-        //Calculate the distance between current and last points
-        distanceToWalkPoint = transform.position - walkPoint;
-        if(distanceToWalkPoint.magnitude < 1f) walkPointSet = false;
-        if(!waitingStatus && distanceToWalkPoint.magnitude == distanceBetweenLastPoint.magnitude) if(counter++ > 10) walkPointSet = false;
-    }
-
-    private void SearchWalkPoint()
-    {
-        //Create a random z between walk point range
-        float randomZ = Random.Range(-walkPointRange, walkPointRange);
-        //Create a random y between walk point range
-        float randomX = Random.Range(-walkPointRange, walkPointRange);
-        //Create a new walk point
+        float randomZ = UnityEngine.Random.Range(-walkPointRange, walkPointRange);
+        float randomX = UnityEngine.Random.Range(-walkPointRange, walkPointRange);
         walkPoint = new Vector3(transform.position.x + randomX, transform.position.y, transform.position.z + randomZ);
-        //Set walk point bool to true
         walkPointSet = true;
     }
 
-    void ChasePlayer()
+    protected virtual void ChasePlayer()
     {
-        gameObject.GetComponent<NavMeshAgent>().enabled = true;
-        //Set run to true when chasing the player
         animator.SetBool("Run", true);
-        animator.SetBool("Walk", false);
-        //Set destination to the player's poisiton
         agent.SetDestination(player.position);
+        transform.rotation = Quaternion.LookRotation(transform.position - player.position);
     }
 
-    void AttackPlayer()
+    protected virtual void AttackPlayer()
     {
-        //Set run to false
-        animator.SetBool("Run", false);
-        animator.SetBool("Walk", false);
-        //Set destination to the current location
-        gameObject.GetComponent<NavMeshAgent>().enabled = false;
-        //Set rotation to the player
-        transform.Rotate(0, (transform.position.y - player.position.y) * Time.deltaTime, 0);
-        //If not attacked
-        if (!alreadyAttacked)
+        throw new NotImplementedException();
+    }
+
+    protected virtual IEnumerator RotateTowardsPlayer(Action action)
+    {
+        if(!playerInAttackRange)
         {
-            //Create a random number between 1 and 4: 1, 2, 3.
-            randomNumber = Random.Range(1, 10);
-            randomNumber = (randomNumber < 5) ? 5 : Random.Range(1, 5);
-            //If the last random number and the generated random number are same, change the random number
-            randomNumber = (lastRandomNumber != randomNumber) ? randomNumber : Random.Range(1, 5);
-            //Set already attacked to true
-            alreadyAttacked = true;
-            //Animation of the enemy to attack
-            animator.SetBool("Attack " + randomNumber, true);
-            //Reset attack after given time
-            Invoke(nameof(ResetAttack), timeBetweenAttacks);
+            enemyState.isRotating = false;
+        }
+        else
+        {
+            enemyState.isRotating = true;
+            Quaternion originalRotation;
+            Quaternion newRotation;
+
+            void DetermineRotations()
+            {
+                originalRotation = transform.rotation;
+                transform.LookAt(player);
+                newRotation = transform.rotation;
+                transform.rotation = originalRotation;
+            }
+
+            DetermineRotations();
+
+            while ((transform.rotation.eulerAngles - newRotation.eulerAngles).magnitude > 5f)
+            {
+                DetermineRotations();
+                transform.rotation = Quaternion.Slerp(transform.rotation, newRotation, rotateSpeedMultipler);
+                yield return null;
+            }
+
+            enemyState.isRotating = false;
+            action?.Invoke();
         }
     }
 
-    private void ResetAttack()
+    protected float CalculateFlightDistanceToPlayer()
     {
-        //Set already attacked to false
-        alreadyAttacked = false;
+        return Helper.CalculateDistance(new Vector2(transform.position.x, transform.position.z), new Vector2(player.position.x, player.position.z));
     }
 
+    protected float CalculateDistanceToPlayer()
+    {
+        return Helper.CalculateDistance(transform.position, player.position);
+    }
+
+    public virtual void ResetAnimation()
+    {
+        //nothing here!
+    }
 }
